@@ -4,13 +4,15 @@ on: [push]
 jobs:
   ubuntu:
     runs-on: ubuntu-24.04
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install & init LXD (dir backend + lxdbr0)
+      - name: Install LXD
         run: |
           sudo snap install lxd --channel=latest/stable
           sudo /snap/bin/lxd waitready
+          # Init with dir backend + lxdbr0 network
           cat <<'YAML' | sudo /snap/bin/lxd init --preseed
           config: {}
           networks:
@@ -25,8 +27,14 @@ jobs:
           profiles:
             - name: default
               devices:
-                root: { path: /, pool: default, type: disk }
-                eth0: { name: eth0, network: lxdbr0, type: nic }
+                root:
+                  path: /
+                  pool: default
+                  type: disk
+                eth0:
+                  name: eth0
+                  network: lxdbr0
+                  type: nic
           cluster: null
           YAML
           sudo lxc remote add ubuntu https://cloud-images.ubuntu.com/releases --protocol simplestreams || true
@@ -36,35 +44,32 @@ jobs:
           ssh-keygen -t rsa -b 4096 -N "" -f id_rsa
           chmod 600 id_rsa
 
-      - name: Launch Ubuntu with cloud-init (auto-SSH)
+      - name: Launch Ubuntu container
+        run: |
+          sudo lxc launch ubuntu:22.04 sysd --config security.nesting=true
+          # wait for systemd
+          sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
+
+      - name: Provision container + enable SSH
         run: |
           PUBKEY=$(cat id_rsa.pub)
-          # cloud-init: install openssh-server, add root authorized_key, enable ssh
-          CI=$(cat <<EOF
-          #cloud-config
-          packages:
-            - openssh-server
-          users:
-            - name: root
-              ssh_authorized_keys:
-                - $PUBKEY
-          runcmd:
-            - systemctl enable --now ssh
-          EOF
-          )
-          sudo lxc launch ubuntu:22.04 sysd \
-            --config security.nesting=true \
-            --config cloud-init.user-data="$CI"
+          sudo lxc exec sysd -- bash -lc "
+            apt-get update -y &&
+            apt-get install -y openssh-server &&
+            systemctl enable --now ssh &&
+            mkdir -p /root/.ssh &&
+            echo '$PUBKEY' > /root/.ssh/authorized_keys &&
+            chmod 600 /root/.ssh/authorized_keys
+          "
 
-      - name: SSH in (built-in retries)
+      - name: Run deploy commands via SSH
         run: |
           IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
-          echo "Container IP: $IP"
           ssh -i id_rsa \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=3 \
             -o ConnectionAttempts=10 \
-            root@"$IP" "echo 'hello from ubuntu'; hostnamectl; true"
+            root@"$IP" "echo 'hello from ubuntu'"
 
       - name: Cleanup
         if: always()
