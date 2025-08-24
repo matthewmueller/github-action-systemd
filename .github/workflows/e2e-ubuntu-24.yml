@@ -64,27 +64,12 @@ jobs:
 
       - name: Run deploy commands via SSH
         run: |
-          # Wait until container gets an IP on lxdbr0
-          for i in {1..20}; do
-            IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
-            if [ -n "$IP" ]; then
-              echo "Container IP: $IP"
-              break
-            fi
-            echo "Waiting for IP..."
-            sleep 2
-          done
-          if [ -z "$IP" ]; then
-            echo "Container did not get an IP" >&2
-            exit 1
-          fi
-
-          # Now SSH in
-          ssh -i id_rsa -o StrictHostKeyChecking=no root@"$IP" "
-            echo 'hello from Ubuntu via SSH';
-            hostnamectl;
-            systemctl is-system-running || true
-          "
+          IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
+          ssh -i id_rsa \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=3 \
+            -o ConnectionAttempts=10 \
+            root@"$IP" "echo 'hello from ubuntu'"
 
       - name: Cleanup
         if: always()
