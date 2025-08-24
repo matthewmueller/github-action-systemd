@@ -1,0 +1,69 @@
+name: e2e-ubuntu-24
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install & init LXD (dir backend so it's fast)
+      - name: Install LXD
+        run: |
+          sudo snap install lxd --channel=latest/stable
+          sudo /snap/bin/lxd waitready
+          cat <<'YAML' | sudo /snap/bin/lxd init --preseed
+          config: {}
+          networks: []
+          storage_pools:
+            - name: default
+              driver: dir
+          profiles:
+            - name: default
+              devices:
+                root:
+                  path: /
+                  pool: default
+                  type: disk
+          cluster: null
+          YAML
+
+      # Generate ephemeral SSH keypair
+      - name: Generate SSH keypair
+        run: |
+          ssh-keygen -t rsa -b 4096 -N "" -f id_rsa
+          chmod 600 id_rsa
+
+      # Launch the container with systemd
+      - name: Launch systemd container
+        run: |
+          sudo lxc launch images:ubuntu/22.04 sysd --config security.nesting=true
+          # Wait for systemd to settle
+          sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
+
+      # Provision inside container + install SSH
+      - name: Provision container
+        run: |
+          PUBKEY=$(cat id_rsa.pub)
+          sudo lxc exec sysd -- bash -lc "
+            apt-get update -y &&
+            apt-get install -y openssh-server &&
+            systemctl enable --now ssh &&
+            mkdir -p /root/.ssh &&
+            echo '$PUBKEY' > /root/.ssh/authorized_keys &&
+            chmod 600 /root/.ssh/authorized_keys
+          "
+
+      # Run commands remotely
+      - name: Run deploy commands via SSH
+        run: |
+          IP=$(sudo lxc list sysd -c 4 --format csv | cut -d' ' -f1)
+          echo "Container IP: $IP"
+          ssh -i id_rsa -o StrictHostKeyChecking=no root@"$IP" "hostnamectl; systemctl is-system-running || true; echo 'deploy ok'"
+
+      # Cleanup
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo lxc delete -f sysd || true
+          rm -f id_rsa id_rsa.pub
