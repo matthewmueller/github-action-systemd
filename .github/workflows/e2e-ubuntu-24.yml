@@ -62,14 +62,36 @@ jobs:
             chmod 600 /root/.ssh/authorized_keys
           "
 
-      - name: Run deploy commands via SSH
+      - name: Export env for Go client
         run: |
           IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
-          ssh -i id_rsa \
-            -o StrictHostKeyChecking=no \
-            -o ConnectTimeout=3 \
-            -o ConnectionAttempts=10 \
-            root@"$IP" "echo 'hello from ubuntu'"
+          echo "IP=$IP" >> $GITHUB_ENV
+          echo "SSH_KEY_PATH=$GITHUB_WORKSPACE/id_rsa" >> $GITHUB_ENV
+          echo "SSH_USER=root" >> $GITHUB_ENV
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Run main.go
+        env:
+          IP: ${{ env.IP }}
+          SSH_KEY_PATH: ${{ env.SSH_KEY_PATH }}
+          SSH_USER: ${{ env.SSH_USER }}
+        run: |
+          # If your repo already has go.mod with sshx dep, keep it simple:
+          go mod tidy
+          go run .
+
+      # - name: Run deploy commands via SSH
+      #   run: |
+      #     IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
+      #     ssh -i id_rsa \
+      #       -o StrictHostKeyChecking=no \
+      #       -o ConnectTimeout=3 \
+      #       -o ConnectionAttempts=10 \
+      #       root@"$IP" "echo 'hello from ubuntu'"
 
       - name: Cleanup
         if: always()
