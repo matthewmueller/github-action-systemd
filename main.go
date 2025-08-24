@@ -59,7 +59,7 @@ func run() error {
 	}
 	defer conn.Close()
 
-	stdout, err := sshx.Run(conn, "hostnamectl --static")
+	stdout, err := sshx.Run(conn, "hostnamectl")
 	if err != nil {
 		return fmt.Errorf("run: %v", err)
 	}
