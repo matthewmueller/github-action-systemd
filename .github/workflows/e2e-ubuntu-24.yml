@@ -1,12 +1,9 @@
-name: lxd-systemd-tests
+name: lxd-systemd-ubuntu
 on: [push]
 
 jobs:
-  test:
+  ubuntu:
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        distro: [ "ubuntu:22.04" ]
 
     steps:
       - uses: actions/checkout@v4
@@ -15,10 +12,15 @@ jobs:
         run: |
           sudo snap install lxd --channel=latest/stable
           sudo /snap/bin/lxd waitready
-          # simple dir backend (faster than zfs)
+          # init with dir backend (faster than zfs)
           cat <<'YAML' | sudo /snap/bin/lxd init --preseed
           config: {}
-          networks: []
+          networks:
+            - name: lxdbr0
+              type: bridge
+              config:
+                ipv4.address: auto
+                ipv6.address: none
           storage_pools:
             - name: default
               driver: dir
@@ -29,53 +31,42 @@ jobs:
                   path: /
                   pool: default
                   type: disk
-          cluster: null
+                eth0:
+                  name: eth0
+                  network: lxdbr0
+                  type: nic
           YAML
-          # add useful remotes
           sudo lxc remote add ubuntu https://cloud-images.ubuntu.com/releases --protocol simplestreams || true
-          sudo lxc remote add images https://images.linuxcontainers.org --protocol simplestreams || true
-          sudo lxc remote list
 
-      - name: Generate SSH keypair
+      - name: Generate ephemeral SSH keypair
         run: |
           ssh-keygen -t rsa -b 4096 -N "" -f id_rsa
           chmod 600 id_rsa
 
-      - name: Launch container (${{ matrix.distro }})
+      - name: Launch Ubuntu container
         run: |
-          sudo lxc launch ${{ matrix.distro }} sysd --config security.nesting=true
+          sudo lxc launch ubuntu:22.04 sysd --config security.nesting=true
           # wait for systemd to settle
           sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
 
-      - name: Provision container + push key
+      - name: Provision container
         run: |
           PUBKEY=$(cat id_rsa.pub)
-          if [[ "${{ matrix.distro }}" == ubuntu:* ]]; then
-            sudo lxc exec sysd -- bash -lc "
-              apt-get update -y &&
-              apt-get install -y openssh-server &&
-              systemctl enable --now ssh &&
-              mkdir -p /root/.ssh &&
-              echo '$PUBKEY' > /root/.ssh/authorized_keys &&
-              chmod 600 /root/.ssh/authorized_keys
-            "
-          else
-            sudo lxc exec sysd -- bash -lc "
-              dnf -y install openssh-server ||
-              yum -y install openssh-server;
-              systemctl enable --now sshd &&
-              mkdir -p /root/.ssh &&
-              echo '$PUBKEY' > /root/.ssh/authorized_keys &&
-              chmod 600 /root/.ssh/authorized_keys
-            "
-          fi
+          sudo lxc exec sysd -- bash -lc "
+            apt-get update -y &&
+            apt-get install -y openssh-server &&
+            systemctl enable --now ssh &&
+            mkdir -p /root/.ssh &&
+            echo '$PUBKEY' > /root/.ssh/authorized_keys &&
+            chmod 600 /root/.ssh/authorized_keys
+          "
 
       - name: Run deploy commands via SSH
         run: |
           IP=$(sudo lxc list sysd -c 4 --format csv | cut -d' ' -f1)
           echo "Container IP: $IP"
           ssh -i id_rsa -o StrictHostKeyChecking=no root@"$IP" "
-            echo 'hello from ${{ matrix.distro }}';
+            echo 'hello from Ubuntu 22.04';
             hostnamectl;
             systemctl is-system-running || true
           "
