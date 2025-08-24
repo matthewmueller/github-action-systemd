@@ -12,7 +12,7 @@ jobs:
         run: |
           sudo snap install lxd --channel=latest/stable
           sudo /snap/bin/lxd waitready
-          # init with dir backend (faster than zfs)
+          # Init with dir backend + lxdbr0 network
           cat <<'YAML' | sudo /snap/bin/lxd init --preseed
           config: {}
           networks:
@@ -35,6 +35,7 @@ jobs:
                   name: eth0
                   network: lxdbr0
                   type: nic
+          cluster: null
           YAML
           sudo lxc remote add ubuntu https://cloud-images.ubuntu.com/releases --protocol simplestreams || true
 
@@ -46,10 +47,10 @@ jobs:
       - name: Launch Ubuntu container
         run: |
           sudo lxc launch ubuntu:22.04 sysd --config security.nesting=true
-          # wait for systemd to settle
+          # wait for systemd
           sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
 
-      - name: Provision container
+      - name: Provision container + enable SSH
         run: |
           PUBKEY=$(cat id_rsa.pub)
           sudo lxc exec sysd -- bash -lc "
@@ -63,10 +64,24 @@ jobs:
 
       - name: Run deploy commands via SSH
         run: |
-          IP=$(sudo lxc list sysd -c 4 --format csv | cut -d' ' -f1)
-          echo "Container IP: $IP"
+          # Wait until container gets an IP on lxdbr0
+          for i in {1..20}; do
+            IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
+            if [ -n "$IP" ]; then
+              echo "Container IP: $IP"
+              break
+            fi
+            echo "Waiting for IP..."
+            sleep 2
+          done
+          if [ -z "$IP" ]; then
+            echo "Container did not get an IP" >&2
+            exit 1
+          fi
+
+          # Now SSH in
           ssh -i id_rsa -o StrictHostKeyChecking=no root@"$IP" "
-            echo 'hello from Ubuntu 22.04';
+            echo 'hello from Ubuntu via SSH';
             hostnamectl;
             systemctl is-system-running || true
           "
