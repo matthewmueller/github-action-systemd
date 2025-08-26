@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/matthewmueller/sshx"
 	"golang.org/x/crypto/ssh"
@@ -64,6 +65,12 @@ func run() error {
 		return fmt.Errorf("run: %v", err)
 	}
 	fmt.Println(stdout)
+
+	stdout, err = sshx.Run(conn, "systemctl is-system-running --no-pager")
+	if err != nil {
+		return fmt.Errorf("check systemd: %v", err)
+	}
+	fmt.Println(strings.TrimSpace(stdout))
 
 	return nil
 }
