@@ -2,11 +2,21 @@ name: lxd-systemd-ubuntu
 on: [push]
 
 jobs:
-  ubuntu:
-    runs-on: ubuntu-24.04
+  e2e-ubuntu:
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache LXD
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/snap/lxd
+            /var/lib/snapd/snaps/lxd_*.snap
+          key: lxd-${{ runner.os }}-${{ hashFiles('**/e2e-ubuntu.yml') }}
+          restore-keys: |
+            lxd-${{ runner.os }}-
 
       - name: Install LXD
         run: |
