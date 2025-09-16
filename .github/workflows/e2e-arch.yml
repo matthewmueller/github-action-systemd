@@ -1,0 +1,100 @@
+name: lxd-systemd-arch
+on: [push]
+
+jobs:
+  e2e-arch:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache LXD
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/snap/lxd
+            /var/lib/snapd/snaps/lxd_*.snap
+          key: lxd-${{ runner.os }}-${{ hashFiles('**/e2e-arch.yml') }}
+          restore-keys: |
+            lxd-${{ runner.os }}-
+
+      - name: Install LXD
+        run: |
+          sudo snap install lxd --channel=latest/stable
+          sudo /snap/bin/lxd waitready
+          # Init with dir backend + lxdbr0 network
+          cat <<'YAML' | sudo /snap/bin/lxd init --preseed
+          config: {}
+          networks:
+            - name: lxdbr0
+              type: bridge
+              config:
+                ipv4.address: auto
+                ipv6.address: none
+          storage_pools:
+            - name: default
+              driver: dir
+          profiles:
+            - name: default
+              devices:
+                root:
+                  path: /
+                  pool: default
+                  type: disk
+                eth0:
+                  name: eth0
+                  network: lxdbr0
+                  type: nic
+          cluster: null
+          YAML
+          sudo lxc remote add images https://images.linuxcontainers.org --protocol simplestreams || true
+
+      - name: Generate ephemeral SSH keypair
+        run: |
+          ssh-keygen -t rsa -b 4096 -N "" -f id_rsa
+          chmod 600 id_rsa
+
+      - name: Launch Arch Linux container
+        run: |
+          sudo lxc launch images:archlinux/current/amd64 sysd --config security.nesting=true
+          # wait for systemd
+          sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
+
+      - name: Provision container + enable SSH
+        run: |
+          PUBKEY=$(cat id_rsa.pub)
+          sudo lxc exec sysd -- bash -lc "
+            pacman -Sy --noconfirm &&
+            pacman -S --noconfirm openssh &&
+            systemctl enable --now sshd &&
+            mkdir -p /root/.ssh &&
+            echo '$PUBKEY' > /root/.ssh/authorized_keys &&
+            chmod 600 /root/.ssh/authorized_keys
+          "
+
+      - name: Export env for Go client
+        run: |
+          IP=$(sudo lxc list sysd -c 4 --format csv | awk '{print $1}')
+          echo "IP=$IP" >> $GITHUB_ENV
+          echo "SSH_KEY_PATH=$GITHUB_WORKSPACE/id_rsa" >> $GITHUB_ENV
+          echo "SSH_USER=root" >> $GITHUB_ENV
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Run main.go
+        env:
+          IP: ${{ env.IP }}
+          SSH_KEY_PATH: ${{ env.SSH_KEY_PATH }}
+          SSH_USER: ${{ env.SSH_USER }}
+        run: |
+          go mod tidy
+          go run .
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo lxc delete -f sysd || true
+          rm -f id_rsa id_rsa.pub
