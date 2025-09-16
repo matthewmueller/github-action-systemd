@@ -64,6 +64,10 @@ jobs:
         run: |
           PUBKEY=$(cat id_rsa.pub)
           sudo lxc exec sysd -- bash -lc "
+            # Configure faster mirrors
+            echo 'Server = https://archlinux.org/\$repo/os/\$arch' > /etc/pacman.d/mirrorlist &&
+            echo 'Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch' >> /etc/pacman.d/mirrorlist &&
+            echo 'Server = https://mirrors.kernel.org/archlinux/\$repo/os/\$arch' >> /etc/pacman.d/mirrorlist &&
             pacman -Sy --noconfirm &&
             pacman -S --noconfirm openssh &&
             systemctl enable --now sshd &&
