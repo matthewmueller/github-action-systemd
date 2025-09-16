@@ -30,6 +30,8 @@ jobs:
               type: bridge
               config:
                 ipv4.address: auto
+                ipv4.nat: "true"
+                ipv6.nat: "false"
                 ipv6.address: none
           storage_pools:
             - name: default
@@ -48,6 +50,7 @@ jobs:
           cluster: null
           YAML
           sudo lxc remote add images https://images.linuxcontainers.org --protocol simplestreams || true
+          sudo sysctl -w net.ipv4.ip_forward=1
 
       - name: Generate ephemeral SSH keypair
         run: |
@@ -60,17 +63,25 @@ jobs:
           # wait for systemd
           sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
 
+      - name: Sanity check container networking
+        run: |
+          sudo lxc exec sysd -- bash -lc 'ping -c1 1.1.1.1 || (ip a; ip r; exit 1)'
+          sudo lxc exec sysd -- bash -lc 'curl -I --max-time 10 https://cdn.amazonlinux.com || (cat /etc/resolv.conf; exit 1)'
+
       - name: Provision container + enable SSH
         run: |
           PUBKEY=$(cat id_rsa.pub)
-          sudo lxc exec sysd -- bash -lc "
-            yum update -y &&
-            yum install -y openssh-server &&
-            systemctl enable --now sshd &&
-            mkdir -p /root/.ssh &&
-            echo '$PUBKEY' > /root/.ssh/authorized_keys &&
+          sudo lxc exec sysd -- bash -lc '
+            set -euo pipefail
+            dnf -y makecache --refresh || true
+            dnf -y update || true
+            dnf -y install openssh-server curl ca-certificates
+
+            systemctl enable --now sshd
+            mkdir -p /root/.ssh
+            echo '"$PUBKEY"' > /root/.ssh/authorized_keys
             chmod 600 /root/.ssh/authorized_keys
-          "
+          '
 
       - name: Export env for Go client
         run: |

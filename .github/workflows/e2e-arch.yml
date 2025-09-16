@@ -30,6 +30,8 @@ jobs:
               type: bridge
               config:
                 ipv4.address: auto
+                ipv4.nat: "true"
+                ipv6.nat: "false"
                 ipv6.address: none
           storage_pools:
             - name: default
@@ -48,17 +50,25 @@ jobs:
           cluster: null
           YAML
           sudo lxc remote add images https://images.linuxcontainers.org --protocol simplestreams || true
+          sudo sysctl -w net.ipv4.ip_forward=1
 
       - name: Generate ephemeral SSH keypair
         run: |
           ssh-keygen -t rsa -b 4096 -N "" -f id_rsa
           chmod 600 id_rsa
 
+
       - name: Launch Arch Linux container
         run: |
           sudo lxc launch images:archlinux sysd --config security.nesting=true
           # wait for systemd
           sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
+
+      - name: Sanity check container networking
+        run: |
+          # Quick outbound checks: ICMP and HTTPS
+          sudo lxc exec sysd -- bash -lc 'ping -c1 1.1.1.1 || (ip a; ip r; exit 1)'
+          sudo lxc exec sysd -- bash -lc 'curl -I --max-time 10 https://archlinux.org || (cat /etc/resolv.conf; exit 1)'
 
       - name: Provision container + enable SSH
         run: |
