@@ -1,8 +1,8 @@
-name: lxd-systemd-ubuntu
+name: e2e-ubuntu
 on: [push]
 
 jobs:
-  e2e-ubuntu:
+  ubuntu:
     runs-on: ubuntu-22.04
 
     steps:

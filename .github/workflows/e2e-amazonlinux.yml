@@ -1,8 +1,8 @@
-name: lxd-systemd-centos
+name: e2e-amazon
 on: [push]
 
 jobs:
-  amazon-linux:
+  amazon:
     runs-on: ubuntu-22.04
 
     steps:
@@ -56,7 +56,7 @@ jobs:
 
       - name: Launch Amazon Linux container
         run: |
-          sudo lxc launch images:amazonlinux/2023/amd64 sysd --config security.nesting=true
+          sudo lxc launch images:amazonlinux/2/amd64 sysd --config security.nesting=true
           # wait for systemd
           sudo lxc exec sysd -- bash -lc 'until systemctl is-system-running --wait; do sleep 1; done || true'
 
@@ -64,8 +64,8 @@ jobs:
         run: |
           PUBKEY=$(cat id_rsa.pub)
           sudo lxc exec sysd -- bash -lc "
-            dnf update -y &&
-            dnf install -y openssh-server &&
+            yum update -y &&
+            yum install -y openssh-server &&
             systemctl enable --now sshd &&
             mkdir -p /root/.ssh &&
             echo '$PUBKEY' > /root/.ssh/authorized_keys &&
